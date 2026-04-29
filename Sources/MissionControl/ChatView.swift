@@ -43,7 +43,7 @@ final class ChatViewModel: ObservableObject {
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !streaming else { return }
-        let userMsg = ChatMessage(id: UUID().uuidString, role: .user, text: text, timestamp: Date(), isError: false)
+        let userMsg = ChatMessage(id: UUID().uuidString, role: .user, parts: [.text(text)], timestamp: Date(), isError: false)
         messages.append(userMsg)
         draft = ""
         streaming = true
@@ -76,16 +76,15 @@ final class ChatViewModel: ObservableObject {
                         self.messages.append(ChatMessage(
                             id: UUID().uuidString,
                             role: .assistant,
-                            text: finalText,
+                            parts: [.text(finalText)],
                             timestamp: Date(),
                             isError: code != 0))
                     } else if code != 0 {
-                        // No stdout but failure — surface stderr as an error message so user sees something
                         let err = fullStderr.trimmingCharacters(in: .whitespacesAndNewlines)
                         self.messages.append(ChatMessage(
                             id: UUID().uuidString,
                             role: .assistant,
-                            text: err.isEmpty ? "claude exited \(code) with no output" : err,
+                            parts: [.text(err.isEmpty ? "claude exited \(code) with no output" : err)],
                             timestamp: Date(),
                             isError: true))
                     }
@@ -180,7 +179,7 @@ struct ChatView: View {
                         MessageBubble(msg: m).id(m.id)
                     }
                     if vm.streaming && !vm.liveAssistant.isEmpty {
-                        MessageBubble(msg: ChatMessage(id: "live", role: .assistant, text: vm.liveAssistant, timestamp: nil, isError: false))
+                        MessageBubble(msg: ChatMessage(id: "live", role: .assistant, parts: [.text(vm.liveAssistant)], timestamp: nil, isError: false))
                             .id("live")
                     }
                 }
@@ -231,13 +230,23 @@ struct MessageBubble: View {
             roleIcon
             VStack(alignment: .leading, spacing: 4) {
                 Text(roleLabel).font(.caption).foregroundStyle(.secondary)
-                Text(msg.text)
-                    .font(.system(.body, design: .default))
-                    .textSelection(.enabled)
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(bg)
-                    .cornerRadius(6)
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(msg.parts.enumerated()), id: \.offset) { _, part in
+                        switch part {
+                        case .text(let s):
+                            Text(s)
+                                .font(.system(.body))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        case .tool(let tool):
+                            ToolBlockView(tool: tool)
+                        }
+                    }
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(bg)
+                .cornerRadius(6)
             }
         }
     }
@@ -260,6 +269,76 @@ struct MessageBubble: View {
     var bg: Color {
         if msg.isError { return Color.red.opacity(0.1) }
         return msg.role == .user ? Color.blue.opacity(0.08) : Color.secondary.opacity(0.08)
+    }
+}
+
+struct ToolBlockView: View {
+    let tool: ToolDisplay
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: iconName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(accent)
+                Text(tool.name)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(accent)
+                if !tool.header.isEmpty {
+                    Text(tool.header)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+                Spacer()
+                if tool.isError {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
+                }
+            }
+            if let body = tool.body, !body.isEmpty {
+                Text(body)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .padding(.leading, 16)
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.black.opacity(0.18))
+                    .cornerRadius(4)
+            }
+        }
+        .padding(6)
+        .background(Color.secondary.opacity(0.10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .stroke(Color.secondary.opacity(0.2), lineWidth: 0.5)
+        )
+        .cornerRadius(5)
+    }
+
+    var iconName: String {
+        switch tool.name {
+        case "Edit", "MultiEdit": return "pencil"
+        case "Write": return "doc.badge.plus"
+        case "Bash": return "terminal"
+        case "Read": return "doc.text"
+        case "Grep": return "magnifyingglass"
+        default: return "wrench.and.screwdriver"
+        }
+    }
+
+    var accent: Color {
+        switch tool.name {
+        case "Edit", "MultiEdit": return .orange
+        case "Write": return .green
+        case "Bash": return .purple
+        default: return .secondary
+        }
     }
 }
 
