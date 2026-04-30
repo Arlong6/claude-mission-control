@@ -1,5 +1,7 @@
 import SwiftUI
 import UserNotifications
+import AppKit
+import UniformTypeIdentifiers
 
 @MainActor
 final class ChatViewModel: ObservableObject {
@@ -8,6 +10,7 @@ final class ChatViewModel: ObservableObject {
     @Published var streaming: Bool = false
     @Published var liveAssistant: String = ""
     @Published var errorBanner: String?
+    @Published var pendingAttachments: [URL] = []
 
     let project: Project
     weak var store: ProjectStore?
@@ -16,6 +19,19 @@ final class ChatViewModel: ObservableObject {
         self.project = project
         self.store = store
         loadHistory()
+    }
+
+    func addPasted(image: NSImage) {
+        guard let url = AttachmentStore.save(image: image) else {
+            errorBanner = "Failed to save pasted image"
+            return
+        }
+        pendingAttachments.append(url)
+    }
+
+    func removePending(_ url: URL) {
+        pendingAttachments.removeAll { $0 == url }
+        try? FileManager.default.removeItem(at: url)
     }
 
     func loadHistory() {
@@ -42,21 +58,33 @@ final class ChatViewModel: ObservableObject {
 
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !streaming else { return }
-        let userMsg = ChatMessage(id: UUID().uuidString, role: .user, parts: [.text(text)], timestamp: Date(), isError: false)
+        let attachmentsToSend = pendingAttachments
+        guard (!text.isEmpty || !attachmentsToSend.isEmpty), !streaming else { return }
+        let displayText: String
+        if text.isEmpty {
+            displayText = "📎 \(attachmentsToSend.count) image\(attachmentsToSend.count == 1 ? "" : "s")"
+        } else if attachmentsToSend.isEmpty {
+            displayText = text
+        } else {
+            displayText = "📎 \(attachmentsToSend.count) image\(attachmentsToSend.count == 1 ? "" : "s")\n" + text
+        }
+        let userMsg = ChatMessage(id: UUID().uuidString, role: .user, parts: [.text(displayText)], timestamp: Date(), isError: false)
         messages.append(userMsg)
         draft = ""
+        pendingAttachments = []
         streaming = true
         liveAssistant = ""
         errorBanner = nil
 
         let projectName = project.shortName
         let sid = sessionID
+        let promptForClaude = text.isEmpty ? "Please describe the attached image(s)." : text
 
         ClaudeBackend.shared.send(
-            prompt: text,
+            prompt: promptForClaude,
             cwd: project.originalPath,
             sessionId: sid,
+            attachments: attachmentsToSend,
             onChunk: { [weak self] chunk in
                 Task { @MainActor in
                     self?.liveAssistant += chunk
@@ -221,47 +249,143 @@ struct ChatView: View {
     }
 
     var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField("Message Claude…", text: $vm.draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.body)
-                .lineLimit(1...8)
-                .padding(.horizontal, 12).padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(NSColor.textBackgroundColor))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
-                )
-                .onSubmit {
-                    vm.send()
-                }
-            Button {
-                vm.send()
-            } label: {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 30, height: 30)
-                    .background(
-                        Circle().fill(canSend ? Color.accentColor : Color.secondary.opacity(0.4))
-                    )
+        VStack(spacing: 8) {
+            if !vm.pendingAttachments.isEmpty {
+                attachmentChips
             }
-            .buttonStyle(.plain)
-            .disabled(!canSend)
-            .help("Send (Enter). Shift+Enter for newline.")
+            HStack(alignment: .bottom, spacing: 10) {
+                Button {
+                    pickImage()
+                } label: {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .help("Attach image")
+                TextField("Message Claude… (⌘V to paste image)", text: $vm.draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.body)
+                    .lineLimit(1...8)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(NSColor.textBackgroundColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
+                    )
+                    .onSubmit {
+                        vm.send()
+                    }
+                Button {
+                    vm.send()
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 30, height: 30)
+                        .background(
+                            Circle().fill(canSend ? Color.accentColor : Color.secondary.opacity(0.4))
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSend)
+                .help("Send (Enter). Shift+Enter for newline.")
+            }
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
         .background(.regularMaterial)
         .overlay(alignment: .top) {
             Divider().opacity(0.6)
         }
+        .onPasteCommand(of: [UTType.image.identifier]) { providers in
+            for provider in providers {
+                if provider.canLoadObject(ofClass: NSImage.self) {
+                    _ = provider.loadObject(ofClass: NSImage.self) { obj, _ in
+                        guard let img = obj as? NSImage else { return }
+                        Task { @MainActor in
+                            vm.addPasted(image: img)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    var attachmentChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(vm.pendingAttachments, id: \.self) { url in
+                    AttachmentChip(url: url) {
+                        vm.removePending(url)
+                    }
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     var canSend: Bool {
-        !vm.draft.trimmingCharacters(in: .whitespaces).isEmpty && !vm.streaming
+        let hasText = !vm.draft.trimmingCharacters(in: .whitespaces).isEmpty
+        let hasImages = !vm.pendingAttachments.isEmpty
+        return (hasText || hasImages) && !vm.streaming
+    }
+
+    func pickImage() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.image, .png, .jpeg, .tiff, .heic]
+        if panel.runModal() == .OK {
+            for url in panel.urls {
+                if let img = NSImage(contentsOf: url) {
+                    vm.addPasted(image: img)
+                }
+            }
+        }
+    }
+}
+
+struct AttachmentChip: View {
+    let url: URL
+    let onRemove: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            if let img = NSImage(contentsOf: url) {
+                Image(nsImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 56, height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
+                    )
+            } else {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.secondary.opacity(0.15))
+                    .frame(width: 56, height: 56)
+                    .overlay(Image(systemName: "photo").foregroundStyle(.secondary))
+            }
+            Button {
+                onRemove()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white, .black.opacity(0.65))
+            }
+            .buttonStyle(.plain)
+            .padding(2)
+            .opacity(hovering ? 1 : 0.85)
+        }
+        .onHover { hovering = $0 }
+        .help(url.lastPathComponent)
     }
 }
 

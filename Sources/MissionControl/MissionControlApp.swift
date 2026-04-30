@@ -23,6 +23,7 @@ final class WindowBridge {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         GlobalHotkey.shared.registerCmdShiftM { WindowBridge.shared.bringToFront() }
+        AttachmentStore.sweepOld()
     }
 }
 

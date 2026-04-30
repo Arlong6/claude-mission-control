@@ -31,6 +31,7 @@ final class ClaudeBackend {
     func send(prompt: String,
               cwd: String,
               sessionId: String?,
+              attachments: [URL] = [],
               onChunk: @escaping (String) -> Void,
               onError: @escaping (String) -> Void,
               onFinish: @escaping (String, String, Int32) -> Void) {
@@ -56,10 +57,27 @@ final class ClaudeBackend {
             "--permission-mode", Self.permissionMode,
             "--output-format", "text"
         ])
+        // Grant Claude read access to each attachment's parent dir (deduplicated)
+        // so its Read tool can pick up pasted images sitting outside cwd.
+        var seenDirs = Set<String>()
+        for url in attachments {
+            let dir = url.deletingLastPathComponent().path
+            if seenDirs.insert(dir).inserted {
+                args.append(contentsOf: ["--add-dir", dir])
+            }
+        }
         if let sid = sessionId, !sid.isEmpty {
             args.append(contentsOf: ["--resume", sid])
         }
-        args.append(prompt)
+        // Reference attachments inline in the prompt so Claude knows to Read them.
+        let finalPrompt: String
+        if attachments.isEmpty {
+            finalPrompt = prompt
+        } else {
+            let lines = attachments.map { "[attached image: \($0.path)]" }.joined(separator: "\n")
+            finalPrompt = lines + "\n\n" + prompt
+        }
+        args.append(finalPrompt)
         p.arguments = args
         p.currentDirectoryURL = URL(fileURLWithPath: cwd)
 
