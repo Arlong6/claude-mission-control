@@ -18,6 +18,16 @@ final class ClaudeBackend {
         return "claude"
     }()
 
+    // Default to `acceptEdits`: auto-approves file edits but still gates Bash and
+    // other risky tools. Set MISSION_CONTROL_BYPASS_PERMISSIONS=1 to restore the
+    // old "approve everything" behavior for power use.
+    private static let permissionMode: String = {
+        if ProcessInfo.processInfo.environment["MISSION_CONTROL_BYPASS_PERMISSIONS"] == "1" {
+            return "bypassPermissions"
+        }
+        return "acceptEdits"
+    }()
+
     func send(prompt: String,
               cwd: String,
               sessionId: String?,
@@ -43,7 +53,7 @@ final class ClaudeBackend {
         if p.executableURL?.path == "/usr/bin/env" { args.append("claude") }
         args.append(contentsOf: [
             "--print",
-            "--permission-mode", "bypassPermissions",
+            "--permission-mode", Self.permissionMode,
             "--output-format", "text"
         ])
         if let sid = sessionId, !sid.isEmpty {

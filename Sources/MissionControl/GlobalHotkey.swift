@@ -32,6 +32,7 @@ final class GlobalHotkey {
                               MemoryLayout<EventHotKeyID>.size,
                               nil,
                               &hkID)
+            guard hkID.signature == GlobalHotkey.signature, hkID.id == 1 else { return noErr }
             DispatchQueue.main.async { me.handler?() }
             return noErr
         }, 1, &spec, selfPtr, nil)
