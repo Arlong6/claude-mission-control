@@ -149,6 +149,7 @@ struct ChatView: View {
     let project: Project
     @EnvironmentObject var store: ProjectStore
     @StateObject var vm: ChatViewModel
+    @State private var pasteMonitor: Any?
 
     init(project: Project, store: ProjectStore) {
         self.project = project
@@ -175,6 +176,33 @@ struct ChatView: View {
                 .background(Color.red.opacity(0.08))
             }
             inputBar
+        }
+        .onAppear { installPasteMonitor() }
+        .onDisappear { removePasteMonitor() }
+    }
+
+    private func installPasteMonitor() {
+        guard pasteMonitor == nil else { return }
+        // Local NSEvent monitor catches ⌘V before TextField does so we can pull
+        // images off the pasteboard. Text-only pastes pass through untouched.
+        pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard mods == .command,
+                  event.charactersIgnoringModifiers?.lowercased() == "v" else {
+                return event
+            }
+            guard let img = NSImage(pasteboard: NSPasteboard.general) else {
+                return event
+            }
+            Task { @MainActor in vm.addPasted(image: img) }
+            return nil
+        }
+    }
+
+    private func removePasteMonitor() {
+        if let m = pasteMonitor {
+            NSEvent.removeMonitor(m)
+            pasteMonitor = nil
         }
     }
 
@@ -300,18 +328,6 @@ struct ChatView: View {
         .background(.regularMaterial)
         .overlay(alignment: .top) {
             Divider().opacity(0.6)
-        }
-        .onPasteCommand(of: [UTType.image.identifier]) { providers in
-            for provider in providers {
-                if provider.canLoadObject(ofClass: NSImage.self) {
-                    _ = provider.loadObject(ofClass: NSImage.self) { obj, _ in
-                        guard let img = obj as? NSImage else { return }
-                        Task { @MainActor in
-                            vm.addPasted(image: img)
-                        }
-                    }
-                }
-            }
         }
     }
 
