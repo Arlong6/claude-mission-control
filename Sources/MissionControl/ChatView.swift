@@ -12,13 +12,20 @@ final class ChatViewModel: ObservableObject {
     @Published var errorBanner: String?
     @Published var pendingAttachments: [URL] = []
 
-    let project: Project
+    private(set) var project: Project
     weak var store: ProjectStore?
 
     init(project: Project, store: ProjectStore? = nil) {
         self.project = project
         self.store = store
         loadHistory()
+    }
+
+    /// Refresh project metadata in place (called when ProjectStore re-scans).
+    /// Crucially does NOT reset streaming state or messages — that would lose
+    /// any in-flight response if the view tree was just torn down and rebuilt.
+    func update(project: Project) {
+        self.project = project
     }
 
     func addPasted(image: NSImage) {
@@ -142,12 +149,12 @@ final class ChatViewModel: ObservableObject {
 struct ChatView: View {
     let project: Project
     @EnvironmentObject var store: ProjectStore
-    @StateObject var vm: ChatViewModel
+    @ObservedObject var vm: ChatViewModel
     @State private var pasteMonitor: Any?
 
-    init(project: Project, store: ProjectStore) {
+    init(project: Project, vm: ChatViewModel) {
         self.project = project
-        _vm = StateObject(wrappedValue: ChatViewModel(project: project, store: store))
+        self.vm = vm
     }
 
     var body: some View {

@@ -11,7 +11,7 @@ struct RootView: View {
                 .frame(minWidth: 280, idealWidth: 320, maxWidth: 380)
             Group {
                 if let project = store.selected {
-                    ChatView(project: project, store: store)
+                    ChatView(project: project, vm: store.chatViewModel(for: project))
                         .id(project.id)
                 } else {
                     EmptyChatPlaceholder()

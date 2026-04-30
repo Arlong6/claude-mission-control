@@ -8,6 +8,21 @@ final class ProjectStore: ObservableObject {
     @Published var hasAnyError: Bool = false
 
     private var refreshTask: Task<Void, Never>?
+    private var chatVMs: [String: ChatViewModel] = [:]
+
+    /// Returns a long-lived ChatViewModel for the project, surviving any
+    /// SwiftUI view tear-down (window close/show, scene rebuild). The vm's
+    /// project metadata is kept fresh in place rather than recreated, so a
+    /// streaming response is never abandoned mid-flight.
+    func chatViewModel(for project: Project) -> ChatViewModel {
+        if let existing = chatVMs[project.id] {
+            existing.update(project: project)
+            return existing
+        }
+        let new = ChatViewModel(project: project, store: self)
+        chatVMs[project.id] = new
+        return new
+    }
 
     func startAutoRefresh() {
         refresh()
@@ -55,6 +70,7 @@ final class ProjectStore: ObservableObject {
         set.insert(id)
         ProjectScanner.saveHidden(set)
         projects.removeAll { $0.id == id }
+        chatVMs.removeValue(forKey: id)
         if selectedID == id { selectedID = nil }
     }
 
@@ -75,6 +91,7 @@ final class ProjectStore: ObservableObject {
         }
         try FileManager.default.removeItem(at: dir)
         projects.removeAll { $0.id == id }
+        chatVMs.removeValue(forKey: id)
         if selectedID == id { selectedID = nil }
     }
 
