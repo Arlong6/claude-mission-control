@@ -12,6 +12,7 @@ struct ChatMessage: Identifiable, Hashable {
 enum ContentPart: Hashable {
     case text(String)
     case tool(ToolDisplay)
+    case image(URL)
 }
 
 struct ToolDisplay: Hashable {
@@ -85,7 +86,9 @@ enum JSONLLoader {
 
         if let s = msg["content"] as? String {
             let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { parts.append(.text(s)) }
+            if !trimmed.isEmpty {
+                parts.append(contentsOf: extractParts(from: s, isUser: topType == "user"))
+            }
         } else if let blocks = msg["content"] as? [[String: Any]] {
             // Skip user messages that ONLY contain tool_results — they're attached to assistant tool_use.
             let onlyToolResults = blocks.allSatisfy { ($0["type"] as? String) == "tool_result" }
@@ -95,7 +98,9 @@ enum JSONLLoader {
                 let bt = b["type"] as? String ?? ""
                 switch bt {
                 case "text":
-                    if let s = b["text"] as? String, !s.isEmpty { parts.append(.text(s)) }
+                    if let s = b["text"] as? String, !s.isEmpty {
+                        parts.append(contentsOf: extractParts(from: s, isUser: topType == "user"))
+                    }
                 case "thinking":
                     break
                 case "tool_use":
@@ -115,6 +120,35 @@ enum JSONLLoader {
         }
         if parts.isEmpty { return nil }
         return ChatMessage(id: id, role: role, parts: parts, timestamp: timestamp, isError: anyError)
+    }
+
+    // MARK: - Image extraction
+
+    private static let attachedImageRegex: NSRegularExpression = {
+        // Tolerant of either bracket style we've shipped.
+        try! NSRegularExpression(pattern: #"\[attached image: ([^\]]+)\]"#)
+    }()
+
+    /// For user messages, peel off our `[attached image: <path>]` markers into
+    /// dedicated image parts so the bubble shows a thumbnail instead of a raw
+    /// /Users/... path. Assistant text is returned as-is.
+    static func extractParts(from raw: String, isUser: Bool) -> [ContentPart] {
+        guard isUser else { return [.text(raw)] }
+        let nsRange = NSRange(raw.startIndex..., in: raw)
+        let matches = attachedImageRegex.matches(in: raw, range: nsRange)
+        guard !matches.isEmpty else { return [.text(raw)] }
+        var parts: [ContentPart] = []
+        for m in matches {
+            if let r = Range(m.range(at: 1), in: raw) {
+                let path = String(raw[r]).trimmingCharacters(in: .whitespaces)
+                parts.append(.image(URL(fileURLWithPath: path)))
+            }
+        }
+        let cleaned = attachedImageRegex
+            .stringByReplacingMatches(in: raw, range: nsRange, withTemplate: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleaned.isEmpty { parts.append(.text(cleaned)) }
+        return parts
     }
 
     // MARK: - Tool rendering

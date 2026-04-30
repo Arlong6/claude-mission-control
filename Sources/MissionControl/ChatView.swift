@@ -60,15 +60,9 @@ final class ChatViewModel: ObservableObject {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let attachmentsToSend = pendingAttachments
         guard (!text.isEmpty || !attachmentsToSend.isEmpty), !streaming else { return }
-        let displayText: String
-        if text.isEmpty {
-            displayText = "📎 \(attachmentsToSend.count) image\(attachmentsToSend.count == 1 ? "" : "s")"
-        } else if attachmentsToSend.isEmpty {
-            displayText = text
-        } else {
-            displayText = "📎 \(attachmentsToSend.count) image\(attachmentsToSend.count == 1 ? "" : "s")\n" + text
-        }
-        let userMsg = ChatMessage(id: UUID().uuidString, role: .user, parts: [.text(displayText)], timestamp: Date(), isError: false)
+        var parts: [ContentPart] = attachmentsToSend.map { .image($0) }
+        if !text.isEmpty { parts.append(.text(text)) }
+        let userMsg = ChatMessage(id: UUID().uuidString, role: .user, parts: parts, timestamp: Date(), isError: false)
         messages.append(userMsg)
         draft = ""
         pendingAttachments = []
@@ -366,6 +360,37 @@ struct ChatView: View {
     }
 }
 
+struct ImagePartView: View {
+    let url: URL
+
+    var body: some View {
+        if let img = NSImage(contentsOf: url) {
+            Image(nsImage: img)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: 280, maxHeight: 280, alignment: .leading)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.2), lineWidth: 0.5)
+                )
+                .help(url.lastPathComponent)
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: "photo")
+                    .foregroundStyle(.secondary)
+                Text(url.lastPathComponent)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.1))
+            )
+        }
+    }
+}
+
 struct AttachmentChip: View {
     let url: URL
     let onRemove: () -> Void
@@ -426,6 +451,8 @@ struct MessageBubble: View {
                             )
                     case .tool(let tool):
                         ToolBlockView(tool: tool)
+                    case .image(let url):
+                        ImagePartView(url: url)
                     }
                 }
             }
