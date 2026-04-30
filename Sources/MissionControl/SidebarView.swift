@@ -6,14 +6,21 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Projects").font(.headline)
+            HStack(spacing: 6) {
+                Text("PROJECTS")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(0.6)
                 Spacer()
-                Text("\(store.projects.count)").foregroundStyle(.secondary)
+                Text("\(store.projects.count)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.12))
+                    .clipShape(Capsule())
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-
-            Divider()
+            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 8)
 
             List(selection: Binding(
                 get: { store.selectedID },
@@ -34,7 +41,9 @@ struct SidebarView: View {
                 }
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
         }
+        .background(.regularMaterial)
         .alert(item: $confirmAction) { ca in
             switch ca.kind {
             case .clear:
@@ -74,17 +83,17 @@ struct ProjectRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
                     Text(project.shortName)
-                        .font(.system(.body, design: .rounded))
+                        .font(.system(.body, design: .rounded).weight(.medium))
                         .lineLimit(1)
                     if project.meta.hasError {
-                        Circle().fill(.red).frame(width: 7, height: 7)
+                        Circle().fill(.red).frame(width: 6, height: 6)
                     }
                 }
                 Text(project.relativeActivityString)
-                    .font(.caption2)
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)
@@ -96,13 +105,17 @@ struct ProjectRow: View {
                     Divider()
                     Button("Hard delete…", role: .destructive) { onAction(.hardDelete) }
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
                 }
                 .menuStyle(.borderlessButton)
-                .frame(width: 24)
+                .menuIndicator(.hidden)
+                .frame(width: 22)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .contextMenu {
             Button("Hide") { onAction(.hide) }
@@ -126,8 +139,8 @@ struct ProjectRow: View {
 
     func badge(_ text: String, color: Color) -> some View {
         Text(text)
-            .font(.system(size: 10, weight: .medium))
-            .padding(.horizontal, 5).padding(.vertical, 1)
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .padding(.horizontal, 6).padding(.vertical, 2)
             .background(color.opacity(0.15))
             .foregroundStyle(color)
             .clipShape(Capsule())

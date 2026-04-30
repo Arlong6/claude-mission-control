@@ -130,33 +130,51 @@ struct ChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             messagesScroll
+                .background(Color(NSColor.textBackgroundColor))
             if let err = vm.errorBanner {
-                Text(err)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .background(Color.red.opacity(0.08))
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Color.red.opacity(0.08))
             }
-            Divider()
             inputBar
         }
     }
 
     var header: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(project.shortName).font(.headline)
-                Text(project.originalPath).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(project.shortName)
+                    .font(.system(.headline, design: .rounded))
+                Text(project.originalPath)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
             Spacer()
             if vm.streaming {
-                ProgressView().controlSize(.small)
-                Button("Stop") { vm.cancel() }
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Button {
+                        vm.cancel()
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                            .labelStyle(.titleAndIcon)
+                    }
                     .buttonStyle(.borderedProminent)
+                    .tint(.red)
                     .controlSize(.small)
+                }
             } else {
                 Button {
                     vm.loadHistory()
@@ -168,13 +186,17 @@ struct ChatView: View {
                 .help("Reload history from .jsonl")
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(.regularMaterial)
+        .overlay(alignment: .bottom) {
+            Divider().opacity(0.6)
+        }
     }
 
     var messagesScroll: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 14) {
                     ForEach(vm.messages) { m in
                         MessageBubble(msg: m).id(m.id)
                     }
@@ -183,7 +205,8 @@ struct ChatView: View {
                             .id("live")
                     }
                 }
-                .padding(12)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
             }
             .onChange(of: vm.messages.count) { _, _ in
                 if let last = vm.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
@@ -198,27 +221,47 @@ struct ChatView: View {
     }
 
     var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message…", text: $vm.draft, axis: .vertical)
+        HStack(alignment: .bottom, spacing: 10) {
+            TextField("Message Claude…", text: $vm.draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.body)
                 .lineLimit(1...8)
-                .padding(8)
-                .background(Color.secondary.opacity(0.08))
-                .cornerRadius(6)
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(NSColor.textBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
+                )
                 .onSubmit {
                     vm.send()
                 }
             Button {
                 vm.send()
             } label: {
-                Image(systemName: "paperplane.fill")
-                    .padding(.horizontal, 8).padding(.vertical, 6)
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 30)
+                    .background(
+                        Circle().fill(canSend ? Color.accentColor : Color.secondary.opacity(0.4))
+                    )
             }
-            .disabled(vm.draft.trimmingCharacters(in: .whitespaces).isEmpty || vm.streaming)
+            .buttonStyle(.plain)
+            .disabled(!canSend)
             .help("Send (Enter). Shift+Enter for newline.")
         }
-        .padding(10)
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .background(.regularMaterial)
+        .overlay(alignment: .top) {
+            Divider().opacity(0.6)
+        }
+    }
+
+    var canSend: Bool {
+        !vm.draft.trimmingCharacters(in: .whitespaces).isEmpty && !vm.streaming
     }
 }
 
@@ -226,49 +269,65 @@ struct MessageBubble: View {
     let msg: ChatMessage
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 10) {
             roleIcon
-            VStack(alignment: .leading, spacing: 4) {
-                Text(roleLabel).font(.caption).foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(msg.parts.enumerated()), id: \.offset) { _, part in
-                        switch part {
-                        case .text(let s):
-                            Text(s)
-                                .font(.system(.body))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        case .tool(let tool):
-                            ToolBlockView(tool: tool)
-                        }
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(msg.parts.enumerated()), id: \.offset) { _, part in
+                    switch part {
+                    case .text(let s):
+                        Text(s)
+                            .font(.system(.body))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12).padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(bg)
+                            )
+                    case .tool(let tool):
+                        ToolBlockView(tool: tool)
                     }
                 }
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(bg)
-                .cornerRadius(6)
             }
-        }
-    }
-
-    var roleLabel: String {
-        switch msg.role {
-        case .user: return "You"
-        case .assistant: return "Claude"
-        case .system: return "System"
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     var roleIcon: some View {
-        Image(systemName: msg.role == .user ? "person.circle.fill" : "sparkles")
-            .foregroundStyle(msg.role == .user ? .blue : .purple)
-            .font(.title3)
-            .frame(width: 22)
+        Group {
+            switch msg.role {
+            case .user:
+                Circle()
+                    .fill(Color.blue.opacity(0.15))
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.blue)
+                    )
+            case .assistant:
+                Circle()
+                    .fill(Color.purple.opacity(0.15))
+                    .overlay(
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.purple)
+                    )
+            case .system:
+                Circle()
+                    .fill(Color.secondary.opacity(0.15))
+                    .overlay(
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    )
+            }
+        }
+        .frame(width: 26, height: 26)
     }
 
     var bg: Color {
-        if msg.isError { return Color.red.opacity(0.1) }
-        return msg.role == .user ? Color.blue.opacity(0.08) : Color.secondary.opacity(0.08)
+        if msg.isError { return Color.red.opacity(0.10) }
+        return msg.role == .user ? Color.blue.opacity(0.08) : Color.secondary.opacity(0.10)
     }
 }
 
@@ -276,49 +335,49 @@ struct ToolBlockView: View {
     let tool: ToolDisplay
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: iconName)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(accent)
-                Text(tool.name)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(accent)
-                if !tool.header.isEmpty {
-                    Text(tool.header)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+        HStack(alignment: .top, spacing: 0) {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(accent.opacity(0.6))
+                .frame(width: 3)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: iconName)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(accent)
+                    Text(tool.name)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(accent)
+                    if !tool.header.isEmpty {
+                        Text(tool.header)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                    Spacer()
+                    if tool.isError {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.red)
+                    }
+                }
+                if let body = tool.body, !body.isEmpty {
+                    Text(body)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
                         .textSelection(.enabled)
-                }
-                Spacer()
-                if tool.isError {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            if let body = tool.body, !body.isEmpty {
-                Text(body)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .padding(.leading, 16)
-                    .padding(.vertical, 4)
-                    .padding(.horizontal, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.black.opacity(0.18))
-                    .cornerRadius(4)
-            }
+            .padding(.leading, 10)
+            .padding(.trailing, 10)
+            .padding(.vertical, 8)
         }
-        .padding(6)
-        .background(Color.secondary.opacity(0.10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 5)
-                .stroke(Color.secondary.opacity(0.2), lineWidth: 0.5)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
         )
-        .cornerRadius(5)
     }
 
     var iconName: String {
@@ -337,6 +396,7 @@ struct ToolBlockView: View {
         case "Edit", "MultiEdit": return .orange
         case "Write": return .green
         case "Bash": return .purple
+        case "Read", "Grep": return .blue
         default: return .secondary
         }
     }

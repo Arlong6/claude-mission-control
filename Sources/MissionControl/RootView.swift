@@ -42,14 +42,21 @@ struct RootView: View {
 
 struct EmptyChatPlaceholder: View {
     var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-            Text("Pick a project on the left")
-                .foregroundStyle(.secondary)
+        VStack(spacing: 14) {
+            Image(systemName: "sparkles.rectangle.stack")
+                .font(.system(size: 56, weight: .light))
+                .foregroundStyle(.tertiary)
+            VStack(spacing: 4) {
+                Text("No project selected")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                Text("Pick one from the sidebar to start chatting")
+                    .font(.callout)
+                    .foregroundStyle(.tertiary)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(NSColor.textBackgroundColor))
     }
 }
 
