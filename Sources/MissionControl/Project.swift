@@ -41,13 +41,21 @@ extension Project {
         }
     }
 
-    /// Stable color picked from a 10-hue palette by hashing the project id.
-    /// Used as a visual identifier in the sidebar and chat header so multiple
-    /// projects are distinguishable at a glance.
+    /// Color reflects how recently the project was touched, so a sidebar scan
+    /// surfaces what's hot vs. cold without reading the timestamp text:
+    ///   green  = within the hour
+    ///   blue   = same day
+    ///   yellow = this week
+    ///   orange = this month
+    ///   gray   = colder than that
     var accentColor: Color {
-        let palette: [Color] = [.blue, .indigo, .purple, .pink, .red, .orange, .yellow, .green, .mint, .teal]
-        var hash = 5381
-        for byte in id.utf8 { hash = ((hash << 5) &+ hash) &+ Int(byte) }
-        return palette[abs(hash) % palette.count]
+        let interval = Date().timeIntervalSince(lastActivity)
+        switch interval {
+        case ..<3_600:     return .green
+        case ..<86_400:    return .blue
+        case ..<604_800:   return .yellow
+        case ..<2_592_000: return .orange
+        default:           return .gray
+        }
     }
 }
