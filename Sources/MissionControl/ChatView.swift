@@ -460,6 +460,8 @@ struct MessageBubble: View {
                         ToolBlockView(tool: tool)
                     case .image(let url):
                         ImagePartView(url: url)
+                    case .thinking(let s):
+                        ThinkingBlockView(text: s)
                     }
                 }
             }
@@ -507,6 +509,8 @@ struct MessageBubble: View {
 
 struct ToolBlockView: View {
     let tool: ToolDisplay
+    @State private var isExpanded = false
+    private let collapsedLines = 5
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -535,14 +539,16 @@ struct ToolBlockView: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.red)
                     }
+                    if hasMore {
+                        Button { isExpanded.toggle() } label: {
+                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                if let body = tool.body, !body.isEmpty {
-                    Text(body)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                bodyView
             }
             .padding(.leading, 10)
             .padding(.trailing, 10)
@@ -553,6 +559,32 @@ struct ToolBlockView: View {
                 .fill(Color.secondary.opacity(0.08))
         )
     }
+
+    @ViewBuilder
+    var bodyView: some View {
+        if isDiff, let oldText = tool.oldText, let newText = tool.body {
+            DiffBlockView(oldText: oldText,
+                          newText: newText,
+                          collapsedLines: collapsedLines,
+                          isExpanded: isExpanded)
+        } else if let body = tool.body, !body.isEmpty {
+            CodeBlockView(text: body,
+                          collapsedLines: collapsedLines,
+                          isExpanded: isExpanded)
+        }
+    }
+
+    var isDiff: Bool {
+        (tool.name == "Edit" || tool.name == "MultiEdit") && tool.oldText != nil
+    }
+
+    var totalLines: Int {
+        let bodyLines = (tool.body?.split(separator: "\n", omittingEmptySubsequences: false).count) ?? 0
+        let oldLines = (tool.oldText?.split(separator: "\n", omittingEmptySubsequences: false).count) ?? 0
+        return isDiff ? bodyLines + oldLines : bodyLines
+    }
+
+    var hasMore: Bool { totalLines > collapsedLines }
 
     var iconName: String {
         switch tool.name {
@@ -573,6 +605,113 @@ struct ToolBlockView: View {
         case "Read", "Grep": return .blue
         default: return .secondary
         }
+    }
+}
+
+struct CodeBlockView: View {
+    let text: String
+    let collapsedLines: Int
+    let isExpanded: Bool
+
+    var body: some View {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let shown = isExpanded ? lines : Array(lines.prefix(collapsedLines))
+        let truncated = !isExpanded && lines.count > collapsedLines
+        Text(shown.joined(separator: "\n") + (truncated ? "\n…" : ""))
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct DiffBlockView: View {
+    let oldText: String
+    let newText: String
+    let collapsedLines: Int
+    let isExpanded: Bool
+
+    var body: some View {
+        let oldLines = oldText.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let newLines = newText.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let oldShown = isExpanded ? oldLines : Array(oldLines.prefix(collapsedLines / 2 + 1))
+        let newShown = isExpanded ? newLines : Array(newLines.prefix(collapsedLines / 2 + 1))
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(Array(oldShown.enumerated()), id: \.offset) { _, line in
+                diffLine("- \(line)", color: .red)
+            }
+            if !isExpanded && oldLines.count > oldShown.count {
+                diffLine("…", color: .secondary)
+            }
+            ForEach(Array(newShown.enumerated()), id: \.offset) { _, line in
+                diffLine("+ \(line)", color: .green)
+            }
+            if !isExpanded && newLines.count > newShown.count {
+                diffLine("…", color: .secondary)
+            }
+        }
+    }
+
+    func diffLine(_ s: String, color: Color) -> some View {
+        Text(s)
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(color.opacity(0.85))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct ThinkingBlockView: View {
+    let text: String
+    @State private var isExpanded = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(Color.secondary.opacity(0.4))
+                .frame(width: 3)
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    isExpanded.toggle()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "brain")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Text("Thinking")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Text("· \(lineCount) line\(lineCount == 1 ? "" : "s")")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+                if isExpanded {
+                    Text(text)
+                        .font(.system(size: 12).italic())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.leading, 10)
+            .padding(.trailing, 10)
+            .padding(.vertical, 8)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.secondary.opacity(0.05))
+        )
+    }
+
+    var lineCount: Int {
+        text.split(separator: "\n", omittingEmptySubsequences: false).count
     }
 }
 

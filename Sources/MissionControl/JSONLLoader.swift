@@ -13,12 +13,14 @@ enum ContentPart: Hashable {
     case text(String)
     case tool(ToolDisplay)
     case image(URL)
+    case thinking(String)
 }
 
 struct ToolDisplay: Hashable {
     let name: String         // "Edit", "Write", "Bash", or other tool name
     let header: String       // short summary line: file path or command
-    let body: String?        // multi-line detail (snippet / output), or nil
+    let body: String?        // FULL detail (snippet / output) — view layer truncates
+    let oldText: String?     // Edit/MultiEdit: original text being replaced (for diff view)
     let isError: Bool
 }
 
@@ -102,7 +104,9 @@ enum JSONLLoader {
                         parts.append(contentsOf: extractParts(from: s, isUser: topType == "user"))
                     }
                 case "thinking":
-                    break
+                    if let s = b["thinking"] as? String, !s.isEmpty {
+                        parts.append(.thinking(s))
+                    }
                 case "tool_use":
                     let name = b["name"] as? String ?? "tool"
                     let useId = b["id"] as? String ?? ""
@@ -158,31 +162,29 @@ enum JSONLLoader {
         case "Edit", "MultiEdit":
             let path = (input["file_path"] as? String) ?? "?"
             let newStr = (input["new_string"] as? String) ?? ""
-            let snippet = firstLines(newStr, lines: 5)
+            let oldStr = (input["old_string"] as? String) ?? ""
             return ToolDisplay(name: name,
                                header: shortPath(path),
-                               body: snippet.isEmpty ? nil : snippet,
+                               body: newStr.isEmpty ? nil : newStr,
+                               oldText: oldStr.isEmpty ? nil : oldStr,
                                isError: output?.isError ?? false)
 
         case "Write":
             let path = (input["file_path"] as? String) ?? "?"
             let content = (input["content"] as? String) ?? ""
-            let snippet = firstLines(content, lines: 5)
             return ToolDisplay(name: name,
                                header: shortPath(path),
-                               body: snippet.isEmpty ? nil : snippet,
+                               body: content.isEmpty ? nil : content,
+                               oldText: nil,
                                isError: output?.isError ?? false)
 
         case "Bash":
             let cmd = (input["command"] as? String) ?? ""
-            let outBody: String? = {
-                guard let out = output?.text else { return nil }
-                let lines = firstLines(out, lines: 10)
-                return lines.isEmpty ? nil : lines
-            }()
+            let outBody = output?.text
             return ToolDisplay(name: name,
                                header: firstLines(cmd, lines: 1).trimmingCharacters(in: .whitespaces),
-                               body: outBody,
+                               body: (outBody?.isEmpty ?? true) ? nil : outBody,
+                               oldText: nil,
                                isError: output?.isError ?? false)
 
         default:
@@ -191,6 +193,7 @@ enum JSONLLoader {
             return ToolDisplay(name: name,
                                header: hint,
                                body: nil,
+                               oldText: nil,
                                isError: output?.isError ?? false)
         }
     }
