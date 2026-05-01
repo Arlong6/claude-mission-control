@@ -82,7 +82,17 @@ struct ProjectRow: View {
     enum RowAction { case hide, clear, hardDelete }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 9) {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [project.accentColor.opacity(0.95), project.accentColor.opacity(0.55)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 9, height: 9)
+                .shadow(color: project.accentColor.opacity(0.5), radius: 2, x: 0, y: 0)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Text(project.shortName)

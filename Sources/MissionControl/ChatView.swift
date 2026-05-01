@@ -209,6 +209,16 @@ struct ChatView: View {
 
     var header: some View {
         HStack(spacing: 10) {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [project.accentColor, project.accentColor.opacity(0.6)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 10, height: 10)
+                .shadow(color: project.accentColor.opacity(0.55), radius: 3, x: 0, y: 0)
             VStack(alignment: .leading, spacing: 2) {
                 Text(project.shortName)
                     .font(.system(.headline, design: .rounded))
@@ -220,8 +230,8 @@ struct ChatView: View {
             }
             Spacer()
             if vm.streaming {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
+                HStack(spacing: 8) {
+                    PulsingDots(color: project.accentColor)
                     Button {
                         vm.cancel()
                     } label: {
@@ -245,6 +255,14 @@ struct ChatView: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(.regularMaterial)
+        .overlay(alignment: .top) {
+            LinearGradient(
+                colors: [project.accentColor.opacity(0.85), project.accentColor.opacity(0.35)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(height: 2)
+        }
         .overlay(alignment: .bottom) {
             Divider().opacity(0.6)
         }
@@ -364,6 +382,30 @@ struct ChatView: View {
                 }
             }
         }
+    }
+}
+
+struct PulsingDots: View {
+    let color: Color
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 4) {
+                ForEach(0..<3) { i in
+                    Circle()
+                        .fill(color)
+                        .frame(width: 6, height: 6)
+                        .opacity(opacity(at: t, index: i))
+                }
+            }
+        }
+        .frame(height: 14)
+    }
+
+    private func opacity(at t: Double, index: Int) -> Double {
+        let phase = (t * 1.6) - Double(index) * 0.25
+        let s = (sin(phase * .pi) + 1) / 2  // 0…1
+        return 0.25 + 0.75 * s
     }
 }
 
@@ -556,7 +598,11 @@ struct ToolBlockView: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.secondary.opacity(0.08))
+                .fill(accent.opacity(0.07))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(accent.opacity(0.18), lineWidth: 0.5)
         )
     }
 

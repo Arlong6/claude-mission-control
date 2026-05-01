@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 struct Project: Identifiable, Hashable {
     let id: String              // dir name, e.g. "-Users-arlong-Projects-AIvideo"
@@ -38,5 +39,15 @@ extension Project {
         case ..<86400: return "\(Int(interval/3600))h ago"
         default: return "\(Int(interval/86400))d ago"
         }
+    }
+
+    /// Stable color picked from a 10-hue palette by hashing the project id.
+    /// Used as a visual identifier in the sidebar and chat header so multiple
+    /// projects are distinguishable at a glance.
+    var accentColor: Color {
+        let palette: [Color] = [.blue, .indigo, .purple, .pink, .red, .orange, .yellow, .green, .mint, .teal]
+        var hash = 5381
+        for byte in id.utf8 { hash = ((hash << 5) &+ hash) &+ Int(byte) }
+        return palette[abs(hash) % palette.count]
     }
 }

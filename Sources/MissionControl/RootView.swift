@@ -45,7 +45,14 @@ struct EmptyChatPlaceholder: View {
         VStack(spacing: 14) {
             Image(systemName: "sparkles.rectangle.stack")
                 .font(.system(size: 56, weight: .light))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [.purple, .pink, .orange],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .shadow(color: .purple.opacity(0.25), radius: 12, x: 0, y: 4)
             VStack(spacing: 4) {
                 Text("No project selected")
                     .font(.title3)
