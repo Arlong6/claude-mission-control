@@ -75,22 +75,40 @@ enum ProjectScanner {
         return "/" + s.replacingOccurrences(of: "-", with: "/")
     }
 
-    /// Read the most recent .jsonl and pull the first `"cwd":"..."` value.
-    /// Authoritative path because Claude Code records cwd on every entry.
+    /// Read the most recent .jsonl line by line until we find a `"cwd":"..."`
+    /// entry, or hit a 512 KB cap. Authoritative because Claude Code records
+    /// cwd on every user/assistant message — we just need to skip past any
+    /// summary/leafUuid header lines new sessions prepend (which can run past
+    /// the old 8 KB window for large summaries).
     static func extractCwd(from url: URL) -> String? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-        // cwd typically appears in the first 4KB
-        let data = (try? handle.read(upToCount: 8 * 1024)) ?? Data()
-        guard let text = String(data: data, encoding: .utf8) else { return nil }
-        // crude but reliable: regex match "cwd":"..."
-        if let range = text.range(of: #""cwd":"([^"]+)""#, options: .regularExpression) {
-            let match = String(text[range])
-            // strip prefix "cwd":" and trailing "
-            if let start = match.range(of: #":""#)?.upperBound {
-                var s = String(match[start...])
-                if s.hasSuffix("\"") { s.removeLast() }
-                return s
+
+        var pending = Data()
+        let chunkSize = 32 * 1024
+        let maxBytes = 512 * 1024
+        var totalRead = 0
+
+        while totalRead < maxBytes {
+            guard let chunk = try? handle.read(upToCount: chunkSize), !chunk.isEmpty else { break }
+            totalRead += chunk.count
+            pending.append(chunk)
+
+            while let nlIdx = pending.firstIndex(of: 0x0A) {
+                let lineData = pending.subdata(in: pending.startIndex..<nlIdx)
+                pending.removeSubrange(pending.startIndex...nlIdx)
+
+                guard let line = String(data: lineData, encoding: .utf8),
+                      line.contains("\"cwd\"") else { continue }
+
+                if let r = line.range(of: #""cwd":"([^"]+)""#, options: .regularExpression) {
+                    let match = String(line[r])
+                    if let start = match.range(of: #":""#)?.upperBound {
+                        var s = String(match[start...])
+                        if s.hasSuffix("\"") { s.removeLast() }
+                        return s
+                    }
+                }
             }
         }
         return nil
