@@ -286,9 +286,10 @@ struct ChatView: View {
             .onChange(of: vm.messages.count) { _, _ in
                 if let last = vm.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
             }
-            .onChange(of: vm.liveAssistant) { _, _ in
-                proxy.scrollTo("live", anchor: .bottom)
-            }
+            // Intentionally NOT auto-scrolling on liveAssistant chunks: yanking
+            // the viewport while the user is reading earlier messages is
+            // disorienting. They can scroll down themselves; once the message
+            // completes (.messages count change) we snap to bottom.
             .onAppear {
                 if let last = vm.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
             }
@@ -348,6 +349,30 @@ struct ChatView: View {
         .overlay(alignment: .top) {
             Divider().opacity(0.6)
         }
+        .onDrop(of: [UTType.fileURL.identifier, UTType.image.identifier], isTargeted: nil) { providers in
+            handleDrop(providers: providers)
+        }
+    }
+
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        var accepted = false
+        for provider in providers {
+            // Try file URL first (Finder drag), then raw image data.
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                accepted = true
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, let img = NSImage(contentsOf: url) else { return }
+                    Task { @MainActor in vm.addPasted(image: img) }
+                }
+            } else if provider.canLoadObject(ofClass: NSImage.self) {
+                accepted = true
+                _ = provider.loadObject(ofClass: NSImage.self) { obj, _ in
+                    guard let img = obj as? NSImage else { return }
+                    Task { @MainActor in vm.addPasted(image: img) }
+                }
+            }
+        }
+        return accepted
     }
 
     var attachmentChips: some View {
@@ -574,12 +599,27 @@ struct ToolBlockView: View {
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(accent)
                     if !tool.header.isEmpty {
-                        Text(tool.header)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .textSelection(.enabled)
+                        if let path = tool.filePath {
+                            Button {
+                                NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                            } label: {
+                                Text(tool.header)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(.primary)
+                                    .underline(true, pattern: .dot)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Open \(path)")
+                        } else {
+                            Text(tool.header)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                        }
                     }
                     Spacer()
                     if tool.isError {

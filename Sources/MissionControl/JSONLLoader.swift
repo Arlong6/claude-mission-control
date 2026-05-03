@@ -21,6 +21,7 @@ struct ToolDisplay: Hashable {
     let header: String       // short summary line: file path or command
     let body: String?        // FULL detail (snippet / output) — view layer truncates
     let oldText: String?     // Edit/MultiEdit: original text being replaced (for diff view)
+    let filePath: String?    // absolute path for tools that target a file (clickable)
     let isError: Bool
 }
 
@@ -167,6 +168,7 @@ enum JSONLLoader {
                                header: shortPath(path),
                                body: newStr.isEmpty ? nil : newStr,
                                oldText: oldStr.isEmpty ? nil : oldStr,
+                               filePath: path == "?" ? nil : path,
                                isError: output?.isError ?? false)
 
         case "Write":
@@ -176,6 +178,7 @@ enum JSONLLoader {
                                header: shortPath(path),
                                body: content.isEmpty ? nil : content,
                                oldText: nil,
+                               filePath: path == "?" ? nil : path,
                                isError: output?.isError ?? false)
 
         case "Bash":
@@ -185,15 +188,27 @@ enum JSONLLoader {
                                header: firstLines(cmd, lines: 1).trimmingCharacters(in: .whitespaces),
                                body: (outBody?.isEmpty ?? true) ? nil : outBody,
                                oldText: nil,
+                               filePath: nil,
+                               isError: output?.isError ?? false)
+
+        case "Read":
+            let path = (input["file_path"] as? String) ?? ""
+            return ToolDisplay(name: name,
+                               header: shortPath(path),
+                               body: nil,
+                               oldText: nil,
+                               filePath: path.isEmpty ? nil : path,
                                isError: output?.isError ?? false)
 
         default:
             // Other tools: just show a one-liner with a hint of the input
             let hint = inputHint(for: name, input: input)
+            let path = (input["file_path"] as? String) ?? (input["path"] as? String)
             return ToolDisplay(name: name,
                                header: hint,
                                body: nil,
                                oldText: nil,
+                               filePath: path,
                                isError: output?.isError ?? false)
         }
     }
