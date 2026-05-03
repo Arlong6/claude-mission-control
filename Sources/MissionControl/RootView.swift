@@ -4,6 +4,7 @@ struct RootView: View {
     @EnvironmentObject var store: ProjectStore
     @EnvironmentObject var settings: AppSettings
     @State private var showSettings = false
+    @State private var showSearch = false
 
     var body: some View {
         HSplitView {
@@ -22,6 +23,15 @@ struct RootView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
+                    showSearch = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .help("Search across all projects (⌘F)")
+                .keyboardShortcut("f", modifiers: .command)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
                     store.refresh()
                 } label: {
                     Image(systemName: "arrow.clockwise")
@@ -36,6 +46,9 @@ struct RootView: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsSheet().environmentObject(settings)
+        }
+        .sheet(isPresented: $showSearch) {
+            SearchSheet(store: store).environmentObject(store)
         }
     }
 }
