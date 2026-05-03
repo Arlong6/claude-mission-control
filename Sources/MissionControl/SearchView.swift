@@ -1,8 +1,27 @@
 import SwiftUI
 
+enum SearchScope: String, CaseIterable, Identifiable, Sendable {
+    case topic       // user messages + assistant text + thinking
+    case userOnly    // user messages only
+    case assistantOnly // assistant text + thinking only
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .topic: return "主題"
+        case .userOnly: return "我講的"
+        case .assistantOnly: return "Claude 講的"
+        }
+    }
+}
+
 @MainActor
 final class SearchModel: ObservableObject {
     @Published var query: String = ""
+    @Published var scope: SearchScope = .topic {
+        didSet { runSearch() }
+    }
     @Published var results: [SearchHit] = []
     @Published var searching: Bool = false
 
@@ -42,6 +61,7 @@ final class SearchModel: ObservableObject {
             }
         }
 
+        let activeScope = scope
         task = Task.detached(priority: .userInitiated) { [weak self] in
             // TaskGroup fans every (project, session) out so the Swift runtime
             // can schedule them across all available cores at once.
@@ -50,6 +70,7 @@ final class SearchModel: ObservableObject {
                     if Task.isCancelled { break }
                     group.addTask {
                         SessionGrep.search(needle: q,
+                                           scope: activeScope,
                                            in: t.url,
                                            projectID: t.projectID,
                                            projectShortName: t.projectShortName,
@@ -86,11 +107,21 @@ struct SearchHit: Identifiable, Hashable {
 }
 
 enum SessionGrep {
-    /// Scan a .jsonl, returning up to `limit` hits per file. Bails on files
-    /// larger than 50 MB so a giant session can't dominate one search.
-    /// Case-insensitive search uses ICU via String.range without per-line
-    /// allocation, so a 100 MB file is one big-string scan, not 10k mallocs.
+    /// Scan a .jsonl for the needle within scope-restricted content. Skips
+    /// files >50 MB so one giant session can't dominate one search.
+    ///
+    /// The pipeline is:
+    ///   1. mmap the file
+    ///   2. cheap whole-file pre-filter — if needle isn't in the raw bytes
+    ///      anywhere, this file is done
+    ///   3. per-line: filter by `type` (user/assistant), then parse JSON,
+    ///      extract only the clean text fields the scope cares about, and
+    ///      run the actual case-insensitive match against that clean text
+    ///
+    /// This means tool params, tool output, and JSON metadata never produce
+    /// hits even though the raw bytes contain them.
     static func search(needle: String,
+                       scope: SearchScope,
                        in url: URL,
                        projectID: String,
                        projectShortName: String,
@@ -99,43 +130,105 @@ enum SessionGrep {
         let attrs = try? url.resourceValues(forKeys: [.fileSizeKey])
         let size = Int64(attrs?.fileSize ?? 0)
         if size > 50 * 1024 * 1024 { return nil }
-        // Memory-mapped read avoids paging the whole file into RSS for huge
-        // sessions; falls back to in-memory if the file system can't map it.
         guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else { return nil }
         let text = String(decoding: data, as: UTF8.self)
-
-        // Cheap pre-filter: if needle isn't anywhere in the whole file, skip
-        // the per-line iteration entirely.
         guard text.range(of: needle, options: [.caseInsensitive]) != nil else { return [] }
 
         var out: [SearchHit] = []
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            // Cheap type pre-filter without parsing JSON. Skips lines that
+            // can't possibly produce a hit for the active scope.
+            guard couldMatchScope(line: line, scope: scope) else { continue }
+            // Even with the right type, the raw line might not contain the
+            // needle anywhere — drop those before paying for JSON parse.
             guard line.range(of: needle, options: [.caseInsensitive]) != nil else { continue }
-            let raw = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any]
-            let role = raw?["type"] as? String ?? "?"
-            let snippet = extractSnippet(from: raw, needle: needle) ?? String(line.prefix(160))
-            out.append(SearchHit(projectID: projectID,
-                                 projectShortName: projectShortName,
-                                 sessionID: sessionID,
-                                 role: role,
-                                 snippet: snippet))
-            if out.count >= limit { break }
+            guard let raw = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
+
+            if let (role, snippet) = match(raw: raw, scope: scope, needle: needle) {
+                out.append(SearchHit(projectID: projectID,
+                                     projectShortName: projectShortName,
+                                     sessionID: sessionID,
+                                     role: role,
+                                     snippet: snippet))
+                if out.count >= limit { break }
+            }
         }
         return out
     }
 
-    private static func extractSnippet(from raw: [String: Any]?, needle: String) -> String? {
-        guard let raw, let msg = raw["message"] as? [String: Any] else { return nil }
-        if let s = msg["content"] as? String { return contextWindow(s, needle: needle) }
-        if let blocks = msg["content"] as? [[String: Any]] {
-            for b in blocks {
-                if let s = b["text"] as? String,
-                   s.range(of: needle, options: [.caseInsensitive]) != nil {
-                    return contextWindow(s, needle: needle)
+    private static func couldMatchScope(line: Substring, scope: SearchScope) -> Bool {
+        switch scope {
+        case .userOnly:
+            return line.contains("\"type\":\"user\"")
+        case .assistantOnly:
+            return line.contains("\"type\":\"assistant\"")
+        case .topic:
+            return line.contains("\"type\":\"user\"") || line.contains("\"type\":\"assistant\"")
+        }
+    }
+
+    /// Pull out only the clean human/assistant text the scope cares about, and
+    /// return the first piece that contains the needle. Returns nil if the
+    /// match was only in metadata or tool params.
+    private static func match(raw: [String: Any],
+                              scope: SearchScope,
+                              needle: String) -> (role: String, snippet: String)? {
+        guard let type = raw["type"] as? String,
+              let msg = raw["message"] as? [String: Any] else { return nil }
+
+        let wantUser = scope == .topic || scope == .userOnly
+        let wantAsst = scope == .topic || scope == .assistantOnly
+
+        if type == "user", wantUser {
+            for text in userTexts(in: msg) {
+                if let snip = matchAndContext(text, needle: needle) {
+                    return ("user", snip)
+                }
+            }
+        }
+        if type == "assistant", wantAsst {
+            for text in assistantTexts(in: msg) {
+                if let snip = matchAndContext(text, needle: needle) {
+                    return ("assistant", snip)
                 }
             }
         }
         return nil
+    }
+
+    /// User-typed content. Skips tool_result blocks (those are system noise
+    /// the user never wrote).
+    private static func userTexts(in msg: [String: Any]) -> [String] {
+        if let s = msg["content"] as? String { return [s] }
+        guard let blocks = msg["content"] as? [[String: Any]] else { return [] }
+        var out: [String] = []
+        for b in blocks {
+            let bt = b["type"] as? String
+            // Some user blocks omit "type" and just carry "text"
+            if (bt == nil || bt == "text"), let s = b["text"] as? String, !s.isEmpty {
+                out.append(s)
+            }
+        }
+        return out
+    }
+
+    /// Assistant content: real prose + thinking. Skips tool_use because its
+    /// `input` JSON would otherwise produce noisy "look I matched a curly
+    /// brace" hits.
+    private static func assistantTexts(in msg: [String: Any]) -> [String] {
+        guard let blocks = msg["content"] as? [[String: Any]] else { return [] }
+        var out: [String] = []
+        for b in blocks {
+            let bt = b["type"] as? String
+            if bt == "text", let s = b["text"] as? String, !s.isEmpty { out.append(s) }
+            if bt == "thinking", let s = b["thinking"] as? String, !s.isEmpty { out.append(s) }
+        }
+        return out
+    }
+
+    private static func matchAndContext(_ s: String, needle: String) -> String? {
+        guard s.range(of: needle, options: [.caseInsensitive]) != nil else { return nil }
+        return contextWindow(s, needle: needle)
     }
 
     /// Return ~160 chars centred around the first match for context.
@@ -189,7 +282,19 @@ struct SearchSheet: View {
                 .buttonStyle(.plain)
                 .keyboardShortcut(.escape, modifiers: [])
             }
-            .padding(14)
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .background(.regularMaterial)
+
+            Picker("Scope", selection: $model.scope) {
+                ForEach(SearchScope.allCases) { s in
+                    Text(s.label).tag(s)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
             .background(.regularMaterial)
 
             Divider()
