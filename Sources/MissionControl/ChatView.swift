@@ -489,15 +489,21 @@ struct MessageBubble: View {
                 ForEach(Array(msg.parts.enumerated()), id: \.offset) { _, part in
                     switch part {
                     case .text(let s):
-                        Text(s)
-                            .font(.system(.body))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12).padding(.vertical, 10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(bg)
-                            )
+                        Group {
+                            if msg.role == .assistant {
+                                MarkdownView(text: s)
+                            } else {
+                                Text(s)
+                                    .font(.system(.body))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(bg)
+                        )
                     case .tool(let tool):
                         ToolBlockView(tool: tool)
                     case .image(let url):
