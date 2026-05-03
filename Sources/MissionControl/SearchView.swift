@@ -299,6 +299,11 @@ struct SearchSheet: View {
 
             Divider()
 
+            // Snapshot the query for the row views so changes after results
+            // are computed don't trigger highlighting against a different
+            // string than the snippet was built around.
+            let activeQuery = model.query.trimmingCharacters(in: .whitespacesAndNewlines)
+
             if model.results.isEmpty {
                 VStack(spacing: 6) {
                     Spacer()
@@ -317,7 +322,7 @@ struct SearchSheet: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
                         ForEach(model.results) { hit in
-                            SearchHitRow(hit: hit) {
+                            SearchHitRow(hit: hit, query: activeQuery) {
                                 store.selectedID = hit.projectID
                                 dismiss()
                             }
@@ -334,6 +339,7 @@ struct SearchSheet: View {
 
 struct SearchHitRow: View {
     let hit: SearchHit
+    let query: String
     let onPick: () -> Void
 
     var body: some View {
@@ -351,7 +357,7 @@ struct SearchHitRow: View {
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
-                Text(hit.snippet)
+                Text(highlightedSnippet)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -365,5 +371,23 @@ struct SearchHitRow: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    /// Walk the snippet looking for case-insensitive matches of `query`,
+    /// painting each match with a yellow background and bumping primary
+    /// foreground so it pops against the secondary-styled body text.
+    private var highlightedSnippet: AttributedString {
+        var attr = AttributedString(hit.snippet)
+        guard !query.isEmpty else { return attr }
+        var cursor = attr.startIndex
+        while cursor < attr.endIndex {
+            let slice = attr[cursor..<attr.endIndex]
+            guard let range = slice.range(of: query, options: [.caseInsensitive]) else { break }
+            attr[range].backgroundColor = Color.yellow.opacity(0.45)
+            attr[range].foregroundColor = .primary
+            attr[range].inlinePresentationIntent = .stronglyEmphasized
+            cursor = range.upperBound
+        }
+        return attr
     }
 }
