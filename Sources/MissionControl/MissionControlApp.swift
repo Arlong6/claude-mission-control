@@ -56,6 +56,14 @@ struct MissionControlApp: App {
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {} // no "New Window"
+            CommandMenu("Projects") {
+                ForEach(0..<9) { i in
+                    Button("Switch to project \(i + 1)") {
+                        store.selectByIndex(i)
+                    }
+                    .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+                }
+            }
         }
 
         // Menubar launcher (just a menu, not a popover)

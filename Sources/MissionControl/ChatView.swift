@@ -11,6 +11,7 @@ final class ChatViewModel: ObservableObject {
     @Published var liveAssistant: String = ""
     @Published var errorBanner: String?
     @Published var pendingAttachments: [URL] = []
+    @Published var activeSessionID: String?
 
     private(set) var project: Project
     weak var store: ProjectStore?
@@ -18,6 +19,7 @@ final class ChatViewModel: ObservableObject {
     init(project: Project, store: ProjectStore? = nil) {
         self.project = project
         self.store = store
+        self.activeSessionID = project.sessions.first?.id
         loadHistory()
     }
 
@@ -26,6 +28,13 @@ final class ChatViewModel: ObservableObject {
     /// any in-flight response if the view tree was just torn down and rebuilt.
     func update(project: Project) {
         self.project = project
+        // If user hasn't picked a specific session yet, follow the newest.
+        if activeSessionID == nil { activeSessionID = project.sessions.first?.id }
+    }
+
+    func switchTo(sessionID: String) {
+        activeSessionID = sessionID
+        loadHistory()
     }
 
     func addPasted(image: NSImage) {
@@ -41,27 +50,35 @@ final class ChatViewModel: ObservableObject {
         try? FileManager.default.removeItem(at: url)
     }
 
+    @Published var usage: SessionUsage?
+
     func loadHistory() {
-        guard let session = project.sessions.first else {
+        let session = project.sessions.first { $0.id == activeSessionID } ?? project.sessions.first
+        guard let session else {
             messages = []
+            usage = nil
             return
         }
         let loaded = JSONLLoader.load(from: session.url, maxMessages: 200)
         messages = loaded
+        // Token sum is cheap enough to recompute on each load; the .jsonl is
+        // already in the OS file cache from the message read above.
+        usage = JSONLLoader.tokenUsage(for: session.url)
     }
 
     /// Re-scan disk for the project's freshest .jsonl and reload (handles claude
     /// having created a forked session file as well as appended-to existing ones).
     func reconcileFromDisk() {
         let updated = ProjectScanner.scanSessions(in: project.claudeDir)
-        guard let session = updated.first else { return }
+        let session = updated.first { $0.id == activeSessionID } ?? updated.first
+        guard let session else { return }
         let loaded = JSONLLoader.load(from: session.url, maxMessages: 200)
         if loaded.count >= messages.count - 1 { // avoid replacing with shorter (truncated) view
             messages = loaded
         }
     }
 
-    var sessionID: String? { project.sessions.first?.id }
+    var sessionID: String? { activeSessionID ?? project.sessions.first?.id }
 
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -222,13 +239,28 @@ struct ChatView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(project.shortName)
                     .font(.system(.headline, design: .rounded))
-                Text(project.originalPath)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: 6) {
+                    Text(project.originalPath)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if project.sessions.count > 1 {
+                        sessionPicker
+                    }
+                }
             }
             Spacer()
+            if let usage = vm.usage {
+                Text(usage.formattedSummary)
+                    .font(.system(size: 11, design: .rounded).weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(
+                        Capsule().fill(Color.secondary.opacity(0.12))
+                    )
+                    .help("Tokens used and estimated cost — \(usage.model ?? "model unknown")")
+            }
             if vm.streaming {
                 HStack(spacing: 8) {
                     PulsingDots(color: project.accentColor)
@@ -387,6 +419,41 @@ struct ChatView: View {
             .padding(.horizontal, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    var sessionPicker: some View {
+        Menu {
+            ForEach(project.sessions) { s in
+                Button {
+                    vm.switchTo(sessionID: s.id)
+                } label: {
+                    let isActive = s.id == vm.activeSessionID
+                    Label(sessionLabel(for: s),
+                          systemImage: isActive ? "checkmark" : "")
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "rectangle.stack")
+                    .font(.system(size: 9))
+                Text("\(project.sessions.count) sessions")
+                    .font(.system(size: 11))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(.secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    func sessionLabel(for s: SessionFile) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        let rel = formatter.localizedString(for: s.modified, relativeTo: Date())
+        let kb = s.sizeBytes / 1024
+        return "\(rel) · \(kb)KB · \(String(s.id.prefix(8)))"
     }
 
     var canSend: Bool {

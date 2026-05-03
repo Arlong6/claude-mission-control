@@ -99,4 +99,11 @@ final class ProjectStore: ObservableObject {
         guard let id = selectedID else { return nil }
         return projects.first { $0.id == id }
     }
+
+    /// Used by ⌘1–⌘9 to jump to the Nth visible project (1-indexed).
+    /// Out-of-range indexes are no-ops.
+    func selectByIndex(_ index: Int) {
+        guard index >= 0, index < projects.count else { return }
+        selectedID = projects[index].id
+    }
 }

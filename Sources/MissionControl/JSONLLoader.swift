@@ -158,6 +158,32 @@ enum JSONLLoader {
 
     // MARK: - Tool rendering
 
+    /// Walk the .jsonl and sum input/output tokens across assistant messages.
+    /// Returns nil if we can't read anything useful.
+    static func tokenUsage(for url: URL) -> SessionUsage? {
+        guard let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        var inTok = 0, outTok = 0, cacheRead = 0, cacheCreate = 0
+        var model: String?
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let raw = parseRaw(String(line)),
+                  raw["type"] as? String == "assistant",
+                  let msg = raw["message"] as? [String: Any] else { continue }
+            if model == nil, let m = msg["model"] as? String { model = m }
+            guard let usage = msg["usage"] as? [String: Any] else { continue }
+            inTok       += (usage["input_tokens"] as? Int) ?? 0
+            outTok      += (usage["output_tokens"] as? Int) ?? 0
+            cacheRead   += (usage["cache_read_input_tokens"] as? Int) ?? 0
+            cacheCreate += (usage["cache_creation_input_tokens"] as? Int) ?? 0
+        }
+        guard inTok + outTok + cacheRead + cacheCreate > 0 else { return nil }
+        return SessionUsage(model: model,
+                            inputTokens: inTok,
+                            outputTokens: outTok,
+                            cacheReadTokens: cacheRead,
+                            cacheCreationTokens: cacheCreate)
+    }
+
     static func renderToolUse(name: String, input: [String: Any], output: (text: String, isError: Bool)?) -> ToolDisplay {
         switch name {
         case "Edit", "MultiEdit":
