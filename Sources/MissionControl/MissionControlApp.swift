@@ -30,10 +30,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct MissionControlApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var store = ProjectStore()
-    @StateObject private var settings = AppSettings()
+    @StateObject private var store: ProjectStore
+    @StateObject private var settings: AppSettings
+    @StateObject private var remoteSettings: RemoteSettings
+    @StateObject private var remoteCoordinator: RemoteCoordinator
 
     init() {
+        let storeInstance = ProjectStore()
+        let remoteSettingsInstance = RemoteSettings()
+        _store = StateObject(wrappedValue: storeInstance)
+        _settings = StateObject(wrappedValue: AppSettings())
+        _remoteSettings = StateObject(wrappedValue: remoteSettingsInstance)
+        _remoteCoordinator = StateObject(wrappedValue: RemoteCoordinator(
+            settings: remoteSettingsInstance,
+            store: storeInstance
+        ))
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
@@ -70,8 +81,19 @@ struct MissionControlApp: App {
         MenuBarExtra("Claude", systemImage: "sparkles") {
             MenuBarLauncher()
                 .environmentObject(store)
+                .environmentObject(remoteCoordinator)
         }
         .menuBarExtraStyle(.menu)
+
+        // ⌘, opens the Mac native Settings sheet with the remote-access tab
+        Settings {
+            TabView {
+                RemoteView()
+                    .environmentObject(remoteCoordinator)
+                    .tabItem { Label("iOS Remote", systemImage: "iphone") }
+            }
+            .frame(minWidth: 560, minHeight: 520)
+        }
     }
 }
 
@@ -90,7 +112,9 @@ struct WindowOpenerCapture: View {
 
 struct MenuBarLauncher: View {
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     @EnvironmentObject var store: ProjectStore
+    @EnvironmentObject var remote: RemoteCoordinator
 
     var body: some View {
         Button("Open Mission Control  ⌘⇧M") {
@@ -105,10 +129,16 @@ struct MenuBarLauncher: View {
                 .foregroundStyle(.red)
         }
         Text("\(store.projects.count) projects")
+        let portText = "port \(remote.settings.port)"
+        let remoteText = remote.isRunning ? "📱 iOS remote: on (\(portText))" : "📱 iOS remote: off"
+        Text(remoteText)
+            .foregroundStyle(remote.isRunning ? Color.green : Color.secondary)
 
         Divider()
 
         Button("Refresh") { store.refresh() }
+        Button("Settings…  ⌘,") { openSettings() }
+            .keyboardShortcut(",", modifiers: .command)
         Button("Quit") { NSApp.terminate(nil) }
             .keyboardShortcut("q", modifiers: .command)
     }

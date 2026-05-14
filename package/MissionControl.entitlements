@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Hardened-runtime entitlements for Mission Control.app.
+
+  We are NOT sandboxed (Claude Code subprocess + arbitrary cwd reads would
+  not survive App Sandbox). Hardened runtime is required for notarization,
+  but we only opt into the minimal set we actually need.
+
+  - allow-jit + allow-unsigned-executable-memory : SwiftUI Previews / inline
+    Swift runtime occasionally JIT-compile. Cheap to allow, no cost.
+  - cs.disable-library-validation : we shell out to `claude` (a Node-based
+    CLI installed under ~/.local/bin or homebrew). The hardened runtime
+    rejects loading dylibs not signed with the same TeamID; this disables
+    that check just for the launched subprocess's view of dylibs.
+  - The "Network" entitlements below are App Sandbox keys; harmless when
+    sandbox is off, but kept so this entitlements file is reusable if we
+    ever sandbox a subset of the app.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>
